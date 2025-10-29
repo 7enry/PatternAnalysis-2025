@@ -75,3 +75,45 @@ class UNet3D(nn.Module):
 
         # Final convolutional layer to map features to output channels
         self.conv = nn.Conv3d(in_channels=features, out_channels=out_channels, kernel_size=1)
+
+    def forward(self, x):
+        """
+        Defines the forward pass of the 3D U-Net.
+        
+        :param x: Input tensor of shape (B, C, D, H, W)
+        :return: Output logits of shape (B, num_classes, D, H, W)
+        """
+        # Encoder path (downsampling)
+        enc1 = self.encoder1(x)
+        enc2 = self.encoder2(self.pool1(enc1))
+        enc3 = self.encoder3(self.pool2(enc2))
+        enc4 = self.encoder4(self.pool3(enc3))
+        enc5 = self.encoder5(self.pool4(enc4))
+
+        # Bottleneck
+        bottleneck = self.bottleneck(self.pool5(enc5))
+        bottleneck = self.dropout(bottleneck)
+
+        # Decoder path (upsampling with skip connections)
+        dec5 = self.upconv5(bottleneck)
+        dec5 = torch.cat((dec5, enc5), dim=1)  # Skip connection
+        dec5 = self.decoder5(dec5)
+        
+        dec4 = self.upconv4(dec5)
+        dec4 = torch.cat((dec4, enc4), dim=1)  # Skip connection
+        dec4 = self.decoder4(dec4)
+        
+        dec3 = self.upconv3(dec4)
+        dec3 = torch.cat((dec3, enc3), dim=1)  # Skip connection
+        dec3 = self.decoder3(dec3)
+        
+        dec2 = self.upconv2(dec3)
+        dec2 = torch.cat((dec2, enc2), dim=1)  # Skip connection
+        dec2 = self.decoder2(dec2)
+        
+        dec1 = self.upconv1(dec2)
+        dec1 = torch.cat((dec1, enc1), dim=1)  # Skip connection
+        dec1 = self.decoder1(dec1)
+
+        # Final output (logits, softmax applied during loss calculation)
+        return self.conv(dec1)
