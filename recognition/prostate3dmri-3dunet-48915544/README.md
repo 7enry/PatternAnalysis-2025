@@ -46,7 +46,7 @@ python train.py --data_dir /home/groups/comp3710/HipMRI_Study_open
 
 ### Evaluation
 ```bash
-python predict.py --checkpoint_path ./checkpoints/best_model.pth
+python predict.py --checkpoint_path ./checkpoints/best.pth
 ```
 
 ## Model Architecture
@@ -60,3 +60,8 @@ The 3D U-Net combines:
 ## License
 
 This project is part of COMP3710 Pattern Analysis coursework.
+
+## References
+
+- mdciri. 3D-augmentation-techniques (GitHub repository). Available at: https://github.com/mdciri/3D-augmentation-techniques (accessed 2025-10-30).
+- GeeksforGeeks. How to convert an array of indices to one-hot encoded NumPy array. Available at: https://www.geeksforgeeks.org/numpy/how-to-convert-an-array-of-indices-to-one-hot-encoded-numpy-array/ (accessed 2025-10-30).

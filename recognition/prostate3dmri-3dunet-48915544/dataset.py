@@ -5,6 +5,10 @@ HipMRI 3D Dataset Loader for Prostate MRI Segmentation
 This module handles loading, preprocessing, and data augmentation of the HipMRI 3D prostate MRI dataset.
 It provides PyTorch Dataset classes for training, validation, and testing with 3D volumes.
 
+References:
+- Augmentation approach inspired by 3D augmentation techniques: https://github.com/mdciri/3D-augmentation-techniques
+- One-hot encoding concept reference: https://www.geeksforgeeks.org/numpy/how-to-convert-an-array-of-indices-to-one-hot-encoded-numpy-array/
+
 Author: Henry
 Course: COMP3710 Pattern Analysis
 """
@@ -92,6 +96,7 @@ def mask_to_onehot(mask: np.ndarray, num_classes: int = NUM_CLASSES) -> np.ndarr
         num_classes: Number of classes
     Returns:
         One-hot mask (num_classes, D, H, W)
+    Reference (concept): https://www.geeksforgeeks.org/numpy/how-to-convert-an-array-of-indices-to-one-hot-encoded-numpy-array/
     """
     onehot = np.zeros((num_classes, *mask.shape), dtype=np.float32)
     mask_int = mask.astype(np.int32)
@@ -127,6 +132,7 @@ class Augment:
     """
     3D data augmentation for prostate MRI using scipy (no external deps).
     Applies flips, rotations, and scaling with synchronized transforms.
+    Inspiration: https://github.com/mdciri/3D-augmentation-techniques
     """
     def __init__(self, target_shape=(96, 96, 96)):
         self.target_shape = target_shape
