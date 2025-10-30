@@ -336,3 +336,169 @@ class HipMRI3DDataset(Dataset):
         mask_tensor = torch.tensor(mask_onehot, dtype=torch.float32)  # (6, D, H, W)
         
         return mri_tensor, mask_tensor
+
+
+# ============================================================================
+# DATALOADER CREATION AND DATASET MANAGEMENT
+# ============================================================================
+
+def create_data_loaders(
+    base_dir: str,
+    target_shape: Tuple[int, int, int] = DEFAULT_TARGET_SHAPE,
+    batch_size: int = 4,
+    num_workers: int = 4,
+    augment_train: bool = True,
+    train_split: float = 0.7,
+    val_split: float = 0.15,
+    normalize_method: str = 'zscore'
+) -> Tuple[Optional[DataLoader], Optional[DataLoader], Optional[DataLoader]]:
+    """
+    Create train/val/test DataLoaders with modular split creation.
+    
+    Args:
+        base_dir: HipMRI root (semantic_MRs/ + semantic_labels_only/)
+        target_shape: Resize target (D, H, W)
+        batch_size: Batch size for training
+        num_workers: Worker processes
+        augment_train: Augment training data only
+        train_split: Training fraction (0.7)
+        val_split: Validation fraction (0.15)
+        normalize_method: Normalization method
+    Returns:
+        (train_loader, val_loader, test_loader)
+    """
+    mri_dir = os.path.join(base_dir, 'semantic_MRs')
+    seg_dir = os.path.join(base_dir, 'semantic_labels_only')
+    
+    # Check directories exist
+    if not os.path.exists(mri_dir):
+        print(f"Warning: {mri_dir} not found")
+        return None, None, None
+    if not os.path.exists(seg_dir):
+        print(f"Warning: {seg_dir} not found")
+        return None, None, None
+    
+    # Get all volume pairs using modular matching
+    volume_pairs = match_mri_label_pairs(mri_dir, seg_dir)
+    
+    # Create splits using modular function
+    train_indices, val_indices, test_indices = create_dataset_splits(
+        volume_pairs, train_split, val_split
+    )
+    
+    # Create datasets with appropriate settings
+    train_dataset = HipMRI3DDataset(mri_dir, seg_dir, target_shape, 
+                                   augment=augment_train, normalize=True, 
+                                   normalize_method=normalize_method)
+    train_dataset.volume_pairs = [volume_pairs[i] for i in train_indices]
+    
+    val_dataset = HipMRI3DDataset(mri_dir, seg_dir, target_shape, 
+                                 augment=False, normalize=True, 
+                                 normalize_method=normalize_method)
+    val_dataset.volume_pairs = [volume_pairs[i] for i in val_indices]
+    
+    test_dataset = HipMRI3DDataset(mri_dir, seg_dir, target_shape, 
+                                  augment=False, normalize=True, 
+                                  normalize_method=normalize_method)
+    test_dataset.volume_pairs = [volume_pairs[i] for i in test_indices]
+    
+    print(f" Dataset splits:")
+    print(f"   Train: {len(train_dataset)} volumes")
+    print(f"   Val: {len(val_dataset)} volumes")
+    print(f"   Test: {len(test_dataset)} volumes")
+    
+    # Create DataLoaders
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, 
+                             num_workers=num_workers, pin_memory=True)
+    
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, 
+                           num_workers=num_workers, pin_memory=True)
+    
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, 
+                            num_workers=num_workers, pin_memory=True)
+    
+    return train_loader, val_loader, test_loader
+
+
+# ============================================================================
+# DATASET INFORMATION AND UTILITIES
+# ============================================================================
+
+def print_dataset_info(base_dir: str) -> None:
+    """
+    Print HipMRI dataset statistics using modular functions.
+    
+    Args:
+        base_dir: HipMRI root directory
+    """
+    print("HipMRI 3D Dataset Information:")
+    print("=" * 50)
+    
+    # Error check
+    if not os.path.exists(base_dir):
+        print(f"Base directory not found: {base_dir}")
+        return
+    
+    mri_dir = os.path.join(base_dir, 'semantic_MRs')
+    seg_dir = os.path.join(base_dir, 'semantic_labels_only')
+    
+    if os.path.exists(mri_dir) and os.path.exists(seg_dir):
+        mri_files = [f for f in os.listdir(mri_dir) if f.endswith(MRI_SUFFIX)]
+        label_files = [f for f in os.listdir(seg_dir) if f.endswith(LABEL_SUFFIX)]
+        
+        print(f" Dataset Files:")
+        print(f"   MRI volumes: {len(mri_files)}")
+        print(f"   Label volumes: {len(label_files)}")
+        
+        # Use modular matching to count pairs
+        try:
+            volume_pairs = match_mri_label_pairs(mri_dir, seg_dir)
+            print(f"    Matched volume pairs: {len(volume_pairs)}")
+            if len(volume_pairs) > 0:
+                print(f"   Sample: {volume_pairs[0]['patient_week']}")
+        except Exception as e:
+            print(f"    Error: {e}")
+    else:
+        print(f"directories not found")
+
+
+def get_dataset_stats(dataset: HipMRI3DDataset) -> Dict[str, Any]:
+    """
+    Get comprehensive statistics about a dataset.
+    
+    Args:
+        dataset: HipMRI3DDataset instance
+    Returns:
+        Dictionary with dataset statistics
+    """
+    stats = {
+        'num_volumes': len(dataset),
+        'target_shape': dataset.target_shape,
+        'augment': dataset.augment,
+        'normalize': dataset.normalize,
+        'normalize_method': getattr(dataset, 'normalize_method', 'zscore'),
+        'classes': HIPMRI_CLASSES,
+        'num_classes': NUM_CLASSES
+    }
+    
+    if len(dataset) > 0:
+        # Get sample info
+        sample_info = dataset.volume_pairs[0]
+        stats['sample_patient_week'] = sample_info['patient_week']
+        stats['mri_dir'] = dataset.mri_dir
+        stats['labels_dir'] = dataset.labels_dir
+    
+    return stats
+
+
+# ============================================================================
+# MAIN AND TESTING
+# ============================================================================
+
+if __name__ == "__main__":
+    # Example usage
+    BASE_DIR = "/home/groups/comp3710/HipMRI_Study_open"
+    TARGET_SHAPE = DEFAULT_TARGET_SHAPE
+    BATCH_SIZE = 4
+    
+    print_dataset_info(BASE_DIR)
