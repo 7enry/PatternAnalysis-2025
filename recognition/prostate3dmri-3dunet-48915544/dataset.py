@@ -183,3 +183,156 @@ class Augment:
                 image = image[slices]
         
         return image
+
+
+# ============================================================================
+# FILE MATCHING AND DATASET UTILITIES
+# ============================================================================
+
+def match_mri_label_pairs(mri_dir: str, labels_dir: str) -> List[Dict[str, str]]:
+    """
+    Match MRI and label files by patient_week pattern.
+    
+    Args:
+        mri_dir: Directory with *_LFOV.nii.gz files
+        labels_dir: Directory with *_SEMANTIC.nii.gz files
+    Returns:
+        List of matched file pairs
+    """
+    mri_files = sorted([f for f in os.listdir(mri_dir) if f.endswith(MRI_SUFFIX)])
+    label_files = sorted([f for f in os.listdir(labels_dir) if f.endswith(LABEL_SUFFIX)])
+    
+    volume_pairs = []
+    for mri_file in mri_files:
+        # Extract: B006_Week0_LFOV.nii.gz -> B006_Week0
+        base_name = mri_file.replace(MRI_SUFFIX, '')
+        expected_label = f"{base_name}{LABEL_SUFFIX}"
+        
+        if expected_label in label_files:
+            volume_pairs.append({
+                'mri_path': os.path.join(mri_dir, mri_file),
+                'label_path': os.path.join(labels_dir, expected_label),
+                'patient_week': base_name
+            })
+        else:
+            print(f"Warning: No matching label found for {mri_file}")
+    
+    return volume_pairs
+
+
+def create_dataset_splits(volume_pairs: List[Dict[str, str]], 
+                         train_split: float = 0.7, 
+                         val_split: float = 0.15) -> Tuple[List[int], List[int], List[int]]:
+    """
+    Create random train/val/test splits from volume pairs.
+    
+    Args:
+        volume_pairs: List of matched file pairs
+        train_split: Training fraction
+        val_split: Validation fraction
+    Returns:
+        (train_indices, val_indices, test_indices)
+    """
+    total_size = len(volume_pairs)
+    train_size = int(train_split * total_size)
+    val_size = int(val_split * total_size)
+    test_size = total_size - train_size - val_size
+    
+    indices = list(range(total_size))
+    random.shuffle(indices)
+    
+    train_indices = indices[:train_size]
+    val_indices = indices[train_size:train_size + val_size]
+    test_indices = indices[train_size + val_size:]
+    
+    return train_indices, val_indices, test_indices
+
+
+# ============================================================================
+# PYTORCH DATASET CLASS
+# ============================================================================
+
+class HipMRI3DDataset(Dataset):
+    """
+    PyTorch Dataset for HipMRI 3D prostate MRI segmentation.
+    
+    Structure: semantic_MRs/*_LFOV.nii.gz + semantic_labels_only/*_SEMANTIC.nii.gz
+    Matches files by patient_week pattern (e.g., B006_Week0).
+    """
+    def __init__(self, mri_dir: str, labels_dir: str, target_shape: Tuple[int, int, int] = DEFAULT_TARGET_SHAPE, 
+                 augment: bool = True, normalize: bool = True, normalize_method: str = 'zscore'):
+        """
+        Initialize HipMRI dataset with modular file matching.
+        
+        Args:
+            mri_dir: Directory with *_LFOV.nii.gz files
+            labels_dir: Directory with *_SEMANTIC.nii.gz files  
+            target_shape: Resize target (D, H, W)
+            augment: Apply random transforms
+            normalize: Apply normalization
+            normalize_method: 'zscore' or 'minmax'
+        """
+        # Use modular file matching
+        self.volume_pairs = match_mri_label_pairs(mri_dir, labels_dir)
+        
+        self.mri_dir = mri_dir
+        self.labels_dir = labels_dir
+        self.target_shape = target_shape
+        self.augment = augment
+        self.normalize = normalize
+        self.normalize_method = normalize_method
+        
+        print(f"Loaded {len(self.volume_pairs)} 3D volume pairs from NIfTI files")
+
+    def __len__(self) -> int:
+        return len(self.volume_pairs)
+
+    def _load_nifti_volume(self, file_path: str) -> np.ndarray:
+        """Load NIfTI volume using utility function."""
+        return load_nifti_volume(file_path)
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Get MRI volume and segmentation mask with preprocessing.
+        
+        Args:
+            idx: Sample index
+        Returns:
+            (MRI, Mask): (1,D,H,W) normalized MRI, (6,D,H,W) one-hot mask
+        """
+        volume_info = self.volume_pairs[idx]
+        
+        # Load NIfTI volumes
+        mri_data = self._load_nifti_volume(volume_info['mri_path'])  # (D, H, W)
+        label_data = self._load_nifti_volume(volume_info['label_path'])  # (D, H, W)
+        
+        # Resize: linear for MRI, nearest for masks
+        mri_data = resize_image(mri_data, self.target_shape, order=1)
+        label_data = resize_image(label_data, self.target_shape, order=0)
+        
+        # Clip labels to valid range (0-5 for 6 classes)
+        label_data = np.clip(label_data, 0, 5).astype(np.uint8)
+        
+        # Synchronized augmentation: same seed for image and mask
+        if self.augment:
+            seed = random.randint(0, 2**32 - 1)
+            augmenter = Augment(target_shape=self.target_shape)
+            
+            random.seed(seed)
+            mri_data = augmenter.apply_augmentation(mri_data, is_mask=False)
+            
+            random.seed(seed)
+            label_data = augmenter.apply_augmentation(label_data, is_mask=True)
+        
+        # Normalize MRI data
+        if self.normalize:
+            mri_data = normalize_volume(mri_data, method=self.normalize_method)
+        
+        # Convert to one-hot encoding
+        mask_onehot = mask_to_onehot(label_data, num_classes=NUM_CLASSES)
+        
+        # Convert to PyTorch tensors
+        mri_tensor = torch.tensor(mri_data, dtype=torch.float32).unsqueeze(0)  # (1, D, H, W)
+        mask_tensor = torch.tensor(mask_onehot, dtype=torch.float32)  # (6, D, H, W)
+        
+        return mri_tensor, mask_tensor
