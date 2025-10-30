@@ -119,3 +119,67 @@ def normalize_volume(volume: np.ndarray, method: str = 'zscore') -> np.ndarray:
     else:
         raise ValueError(f"Unknown normalization method: {method}")
 
+# ============================================================================
+# DATA AUGMENTATION
+# ============================================================================
+
+class Augment:
+    """
+    3D data augmentation for prostate MRI using scipy (no external deps).
+    Applies flips, rotations, and scaling with synchronized transforms.
+    """
+    def __init__(self, target_shape=(96, 96, 96)):
+        self.target_shape = target_shape
+
+    def apply_augmentation(self, image: np.ndarray, is_mask: bool = False) -> np.ndarray:
+        """
+        Apply random 3D augmentations with proper interpolation.
+        
+        Args:
+            image: 3D volume (D, H, W)
+            is_mask: Use nearest-neighbor for masks, linear for images
+        Returns:
+            Augmented volume
+        """
+        # Set interpolation: nearest for masks, linear for images
+        interp_order = 0 if is_mask else 1
+        
+        # Random flips: 50% chance per axis
+        if random.random() > 0.5:
+            image = np.flip(image, axis=0)  # Flip depth
+        if random.random() > 0.5:
+            image = np.flip(image, axis=1)  # Flip height
+        if random.random() > 0.5:
+            image = np.flip(image, axis=2)  # Flip width
+        
+        # Random rotation: ±5 degrees around random axis
+        if random.random() > 0.5:
+            axis = random.choice([0, 1, 2])
+            angle = random.uniform(-5, 5)
+            image = rotate(image, angle, axes=(axis, (axis + 1) % 3), 
+                          reshape=False, order=interp_order, mode='constant')
+        
+        # Random scaling: 90-110% with crop/pad to maintain size
+        if random.random() > 0.5:
+            scale_factor = random.uniform(0.9, 1.1)
+            current_shape = image.shape
+            new_shape = tuple(int(s * scale_factor) for s in current_shape)
+            
+            # Resize using zoom
+            zoom_factors = [n / o for n, o in zip(new_shape, current_shape)]
+            image = zoom(image, zoom_factors, order=interp_order, mode='constant')
+            
+            # Restore original size
+            if scale_factor > 1.0:
+                # Crop from center
+                slices = tuple(slice(0, s) for s in self.target_shape)
+                image = image[slices]
+            else:
+                # Pad with zeros
+                pad_width = [(0, max(0, target - current)) for target, current in zip(self.target_shape, image.shape)]
+                image = np.pad(image, pad_width, mode='constant')
+                # Crop to exact size
+                slices = tuple(slice(0, s) for s in self.target_shape)
+                image = image[slices]
+        
+        return image
