@@ -144,6 +144,52 @@ Total parameters: {total_params:,}
 Trainable parameters: {trainable_params:,}
         """
 
+
+def dice_coefficient(pred, target, smooth=1e-6):
+    """
+    Calculate Dice coefficient for 3D segmentation evaluation.
+    
+    Args:
+        pred: Predicted logits (B, C, D, H, W) or probabilities
+        target: Ground truth segmentation (B, C, D, H, W) one-hot encoded
+        smooth: Smoothing factor to avoid division by zero
+        
+    Returns:
+        Tensor: Dice coefficient for each class
+    """
+    # Convert to probabilities if needed
+    if pred.max() > 1:
+        pred = torch.softmax(pred, dim=1)
+    
+    # Flatten tensors
+    pred_flat = pred.view(pred.size(0), pred.size(1), -1)
+    target_flat = target.view(target.size(0), target.size(1), -1)
+    
+    # Calculate intersection and union
+    intersection = (pred_flat * target_flat).sum(dim=2)
+    union = pred_flat.sum(dim=2) + target_flat.sum(dim=2)
+    
+    # Calculate Dice coefficient
+    dice = (2.0 * intersection + smooth) / (union + smooth)
+    
+    return dice
+
+
+def dice_loss(pred, target, smooth=1e-6):
+    """
+    Calculate Dice loss for 3D segmentation training.
+    
+    Args:
+        pred: Predicted logits (B, C, D, H, W)
+        target: Ground truth segmentation (B, C, D, H, W) one-hot encoded
+        smooth: Smoothing factor to avoid division by zero
+        
+    Returns:
+        Tensor: Dice loss (1 - dice_coefficient)
+    """
+    dice = dice_coefficient(pred, target, smooth)
+    return 1 - dice.mean()
+
 if __name__ == "__main__":
     # Test the model
     model = UNet3D(in_channels=1, out_channels=6, init_features=32)
