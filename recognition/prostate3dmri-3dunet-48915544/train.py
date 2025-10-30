@@ -70,5 +70,90 @@ def calculate_dice_per_class(pred, target, num_classes=6, smooth=1e-6):
     return dice_scores
 
 
+def save_checkpoint(state, is_best, checkpoint_dir, epoch):
+    """Save minimal checkpoint: only best weights; no per-epoch files."""
+    if is_best:
+        best_filepath = os.path.join(checkpoint_dir, 'best.pth')
+        # Save weights only to minimize disk usage
+        torch.save(state['model_state_dict'], best_filepath)
+
+
+def plot_metrics(metrics, title, ylabel, filename, results_dir):
+    """Plots training metrics."""
+    plt.figure(figsize=(10, 6))
+    for label, values in metrics.items():
+        plt.plot(values, label=label)
+    plt.title(title)
+    plt.xlabel('Epoch')
+    plt.ylabel(ylabel)
+    plt.legend()
+    plt.grid(True)
+    plt.savefig(os.path.join(results_dir, filename), dpi=150, bbox_inches='tight')
+    plt.close()
+
+
+def plot_qualitative_examples(model, val_loader, device, results_dir, num_examples=3):
+    """Plot qualitative examples: input, GT, prediction."""
+    model.eval()
+    with torch.no_grad():
+        for i, (mri_data, label_data) in enumerate(val_loader):
+            if i >= num_examples:
+                break
+                
+            mri_data = mri_data.to(device)
+            label_data = label_data.to(device)
+            
+            # Get prediction
+            outputs = model(mri_data)
+            pred_labels = torch.argmax(outputs, dim=1)  # (B, D, H, W)
+            gt_labels = torch.argmax(label_data, dim=1)  # (B, D, H, W)
+            
+            # Take middle slice for visualization
+            batch_idx = 0
+            slice_idx = mri_data.shape[2] // 2
+            
+            fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+            
+            # Input MRI
+            axes[0].imshow(mri_data[batch_idx, 0, slice_idx].cpu().numpy(), cmap='gray')
+            axes[0].set_title('Input MRI')
+            axes[0].axis('off')
+            
+            # Ground Truth
+            im1 = axes[1].imshow(gt_labels[batch_idx, slice_idx].cpu().numpy(), cmap='tab10', vmin=0, vmax=5)
+            axes[1].set_title('Ground Truth')
+            axes[1].axis('off')
+            
+            # Prediction
+            im2 = axes[2].imshow(pred_labels[batch_idx, slice_idx].cpu().numpy(), cmap='tab10', vmin=0, vmax=5)
+            axes[2].set_title('Prediction')
+            axes[2].axis('off')
+            
+            plt.tight_layout()
+            plt.savefig(os.path.join(results_dir, f'qualitative_examples_case{i:02d}.png'), 
+                       dpi=150, bbox_inches='tight')
+            plt.close()
+
+
+def plot_dice_boxplot(test_dice_scores, results_dir):
+    """Plot Dice score boxplot across test set."""
+    plt.figure(figsize=(12, 8))
+    
+    # Prepare data for boxplot
+    data = []
+    labels = []
+    for class_idx, scores in test_dice_scores.items():
+        data.append(scores)
+        labels.append(CLASS_NAMES[class_idx])
+    
+    plt.boxplot(data, labels=labels)
+    plt.title('Test Set Dice Scores by Class')
+    plt.ylabel('Dice Score')
+    plt.xticks(rotation=45)
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(os.path.join(results_dir, 'test_dice_summary.png'), dpi=150, bbox_inches='tight')
+    plt.close()
+
 if __name__ == "__main__":
     main()
